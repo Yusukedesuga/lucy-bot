@@ -197,25 +197,26 @@ chat_history = []
 async def on_ready():
     print(f'ログインしました: {client.user}')
 
-# --- ★修正：日本時間＆1日1回制限付き監視システム ---
+# --- ★修正：本番用（平日10時～18時のみ・ログなし） ---
 @client.event
 async def on_presence_update(before, after):
-    global last_scold_date # 最後に怒った日を書き換えるため
+    global last_scold_date 
 
     if after.id != TARGET_USER_ID: return
 
     if after.activity and after.activity != before.activity:
         game_name = after.activity.name
+        # 監視対象のゲーム
         if "FINAL FANTASY" in game_name or "Monster Hunter" in game_name or "Steam" in game_name:
             
             # UTC時間に9時間足して日本時間(JST)にする
             jst_now = datetime.utcnow() + timedelta(hours=9)
-            today_str = jst_now.strftime('%Y-%m-%d') # "2025-11-24" のような文字
+            today_str = jst_now.strftime('%Y-%m-%d')
 
-            # 日本時間の 月曜(0)～金曜(4) かつ 10時～18時
+            # 【本番設定】平日(月～金) の 10時～18時
             if jst_now.weekday() < 5 and 10 <= jst_now.hour < 18:
                 
-                # 「今日まだ怒ってない」場合だけ怒る
+                # 今日まだ怒ってない場合だけ怒る
                 if last_scold_date != today_str:
                     channel = client.get_channel(CHAT_CHANNEL_ID)
                     if channel:
@@ -223,7 +224,6 @@ async def on_presence_update(before, after):
                             f"<@{TARGET_USER_ID}> **ちょっと！平日のお昼だよ！？** 😡\n"
                             f"『{game_name}』やってる場合じゃないでしょ！研究進んだの！？"
                         )
-                        # 「今日怒った」と記録する
                         last_scold_date = today_str
 
 @client.event
@@ -316,3 +316,4 @@ async def on_message(message):
 keep_alive()
 if DISCORD_TOKEN:
     client.run(DISCORD_TOKEN)
+
