@@ -3,15 +3,13 @@ from discord.ui import Button, View
 import google.generativeai as genai
 import os
 import json
-from datetime import datetime
-from keep_alive import keep_alive  # Webサーバー機能を読み込み
-from dotenv import load_dotenv     # ローカルの.envファイルを読み込み
+from datetime import datetime, timedelta, timezone # ★時間操作用の道具を追加
+from keep_alive import keep_alive
+from dotenv import load_dotenv
 
 # --- 設定読み込み ---
-# 自分のPCにある .env ファイルを読み込む（Renderでは無視されます）
 load_dotenv()
 
-# 環境変数からキーとIDを取得（文字列として取れるので、IDはintで数字に変換！）
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
@@ -21,8 +19,7 @@ try:
     ROLE_ID = int(os.getenv("ROLE_ID"))
     TARGET_USER_ID = int(os.getenv("TARGET_USER_ID"))
 except TypeError:
-    print("エラー：環境変数が設定されていません！.envファイルかRenderの設定を確認してね！")
-    # エラー回避のためのダミー数値（動かないけど落ちないようにする）
+    print("エラー：環境変数が設定されていません！")
     RECRUIT_FORUM_ID = 0
     CHAT_CHANNEL_ID = 0
     ROLE_ID = 0
@@ -30,6 +27,7 @@ except TypeError:
 
 # --- 設定 ---
 MACRO_FILE = "macros.json"
+last_scold_date = None # ★追加：最後に怒った日を覚える変数
 
 # --- Geminiの設定 ---
 genai.configure(api_key=GEMINI_API_KEY)
@@ -199,20 +197,34 @@ chat_history = []
 async def on_ready():
     print(f'ログインしました: {client.user}')
 
+# --- ★修正：日本時間＆1日1回制限付き監視システム ---
 @client.event
 async def on_presence_update(before, after):
+    global last_scold_date # 最後に怒った日を書き換えるため
+
     if after.id != TARGET_USER_ID: return
+
     if after.activity and after.activity != before.activity:
         game_name = after.activity.name
         if "FINAL FANTASY" in game_name or "Monster Hunter" in game_name or "Steam" in game_name:
-            now = datetime.now()
-            if now.weekday() < 5 and 10 <= now.hour < 18:
-                channel = client.get_channel(CHAT_CHANNEL_ID)
-                if channel:
-                    await channel.send(
-                        f"<@{TARGET_USER_ID}> **ちょっと！平日のお昼だよ！？** 😡\n"
-                        f"『{game_name}』やってる場合じゃないでしょ！研究進んだの！？"
-                    )
+            
+            # UTC時間に9時間足して日本時間(JST)にする
+            jst_now = datetime.utcnow() + timedelta(hours=9)
+            today_str = jst_now.strftime('%Y-%m-%d') # "2025-11-24" のような文字
+
+            # 日本時間の 月曜(0)～金曜(4) かつ 10時～18時
+            if jst_now.weekday() < 5 and 10 <= jst_now.hour < 18:
+                
+                # 「今日まだ怒ってない」場合だけ怒る
+                if last_scold_date != today_str:
+                    channel = client.get_channel(CHAT_CHANNEL_ID)
+                    if channel:
+                        await channel.send(
+                            f"<@{TARGET_USER_ID}> **ちょっと！平日のお昼だよ！？** 😡\n"
+                            f"『{game_name}』やってる場合じゃないでしょ！研究進んだの！？"
+                        )
+                        # 「今日怒った」と記録する
+                        last_scold_date = today_str
 
 @client.event
 async def on_message(message):
@@ -279,12 +291,15 @@ async def on_message(message):
                         role_msg = f"（**{author_role}** に入れておいたよ！）" if author_role and author_role != "None" else ""
                         await message.reply(f"完了！募集タイプ **{recruit_type}** で作成しました！{role_msg}📢")
                     else:
-                        await message.reply("チャンネルIDの取得に失敗しました。.envまたはRender設定を確認してください！")
+                        await message.reply("IDの設定を確認してね！")
                 else:
                     if not isinstance(message.channel, discord.Thread):
                         thread_name = f"Lucyとのナイショ話 ({message.author.display_name})"
-                        thread = await message.create_thread(name=thread_name, auto_archive_duration=60)
-                        await thread.send(f"{message.author.mention} ここでゆっくり話そう！\n\n{bot_reply}")
+                        try:
+                            thread = await message.create_thread(name=thread_name, auto_archive_duration=60)
+                            await thread.send(f"{message.author.mention} ここでゆっくり話そう！\n\n{bot_reply}")
+                        except:
+                            await message.reply(bot_reply)
                     else:
                         await message.reply(bot_reply)
                     
@@ -293,19 +308,11 @@ async def on_message(message):
                     if len(chat_history) > 20: del chat_history[0:2]
 
             except Exception as e:
+                # 重複エラーなら無視
+                if "160004" in str(e): return
                 await message.reply(f"エラー発生！: `{e}`")
                 print(e)
 
-# Webサーバー起動（クラウドでBotを起こし続けるための魔法）
 keep_alive()
-
-# Bot起動
 if DISCORD_TOKEN:
     client.run(DISCORD_TOKEN)
-else:
-
-    print("エラー: Tokenがありません！")
-
-
-
-
