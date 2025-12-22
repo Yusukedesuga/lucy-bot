@@ -1,5 +1,4 @@
 discord.py
-google-generativeai
-flask
 python-dotenv
+google-generativeai
 duckduckgo-search
